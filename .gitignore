@@ -1,0 +1,13 @@
+__pycache__/
+*.py[oc]
+build/
+wheels/
+*.egg-info
+.venv
+.idea
+output/*
+storage/*
+!storage/.gitkeep
+!output/.gitkeep
+test.py
+log.txt
