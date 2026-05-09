@@ -1,6 +1,5 @@
+import xml.etree.ElementTree as ET
 import os
-import xml.etree.ElementTree as Et
-
 import ffmpeg
 from loguru import logger
 
@@ -108,64 +107,105 @@ def merge_videos(file_name, streams_dir="./storage/", output_path="./output/"):
         logger.error(f"An unexpected error merging videos: {e}")
 
 
-def get_timing(xml_file):
-    start_time, end_time = None, None
+def decode_xml(xml_path, media_folder="input_path"):
+    if not os.path.exists(xml_path):
+        print(f"Error: {xml_path} not found.")
+        return
 
-    try:
-        xml = Et.parse(source=f'storage/{xml_file}')
-        root = xml.getroot()
+    xml = ET.parse(xml_path)
+    root = xml.getroot()
+    streams = {}
+    media = []
+    max_duration_ms = 0
 
-        message_elements = [
-            msg for msg in root.findall('.//Message')
-            if msg.find('Method').text == 'pacingTick'
-        ]
+    for message in root.findall('Message'):
+        msg_time = int(message.get('time', 0))
+        if msg_time > max_duration_ms: 
+            max_duration_ms = msg_time
+        
+        event_type = ""
+        for s in message.findall('String'):
+            if s.text in ["streamAdded", "streamRemoved"]:
+                event_type = s.text
+                break
+        
+        if not event_type: 
+            continue
 
-        if message_elements:
-            first_message = message_elements[0]
-            last_message = message_elements[-1]
+        array = message.find('Array')
+        if array is not None:
+            obj = array.find('Object')
+            if obj is not None:
+                s_id = obj.findtext('streamId')
+                s_name = obj.findtext('streamName', '').lstrip('/')
+                s_start = obj.findtext('startTime')
+                s_type = obj.findtext('streamType', '').lower()
 
-            start_time = first_message.find('Number').text.strip()
-            end_time = last_message.find('Number').text.strip()
+                if event_type == "streamAdded":
+                    streams[s_id] = {
+                        "name": s_name,
+                        "type": s_type,
+                        "start": int(s_start) if s_start else msg_time
+                    }
+                elif event_type == "streamRemoved":
+                    if s_id in streams:
+                        data = streams.pop(s_id)
+                        data["end"] = msg_time
+                        media.append(data)
 
-            logger.info(f"Start time: {start_time}")
-            logger.info(f"End time: {end_time}")
+    for s_id, data in streams.items():
+        data["end"] = max_duration_ms
+        media.append(data)
 
-    except Et.ParseError as e:
-        logger.error(e)
-    except Exception as e:
-        logger.error(f"Unexpected error: {e}")
-
-    return start_time, end_time
+    media.sort(key=lambda x: x['start'])
+    return media
 
 
 def main():
     logger.add('log.txt')
 
-    storage_files = os.listdir("./storage")
+    # Path to the XML recording metadata (adjust if needed)
+    XML_PATH = "./storage/indexstream.xml"
 
-    screen_shares = filter_files(storage_files, "screenshare", ".flv")
-    sounds_flv = filter_files(storage_files, "cameraVoip", ".flv")
-    sounds_xml = filter_files(storage_files, "cameraVoip", ".xml")
+    media_list = decode_xml(XML_PATH)
+    if not media_list:
+        logger.error("No media entries found in XML or XML file missing. Exiting.")
+        return
 
-    converted_videos = []
+    converted_videos = []   # list of output .mp4 filenames for merging
 
-    for v in screen_shares:
-        logger.info(f"Processing {v}")
-        if convert_media(v, output_format=".mp4"):
-            converted_videos.append(os.path.splitext(v)[0] + ".mp4")
+    for media in media_list:
+        base_name = media['name']           
+        media_type = media['type']
+        file_name = f"{base_name}.flv"
 
+        # Determine output format based on stream type
+        if "screenshare" in media_type:
+            output_format = ".mp4"
+        elif "cameravoip" in media_type:
+            output_format = ".mp3"
+        else:
+            logger.warning(f"Unknown stream type '{media_type}' for {file_name}, skipping.")
+            continue
+
+        # Check that the source file actually exists in ./storage/
+        source_path = os.path.join("./storage", file_name)
+        if not os.path.exists(source_path):
+            logger.warning(f"Source file {source_path} not found, skipping.")
+            continue
+
+        if convert_media(file_name , output_format=output_format):
+            if output_format == ".mp4":
+                converted_videos.append(os.path.splitext(file_name)[0] + ".mp4")
+        else:
+            logger.error(f"Conversion failed for {file_name}")
+
+    # Merge all successfully converted video files
     if converted_videos:
         create_videos_streams(converted_videos)
         merge_videos('screenshare.mp4')
     else:
-        logger.warning("No videos to merge!")
-
-    for sound in sounds_flv:
-        logger.info(f"Processing {sound}")
-        if convert_media(sound, output_format=".mp3"):
-            logger.info(f"Converted {sound}")
-        else:
-            logger.error(f"Convertion failed for {sound}")
+        logger.warning("No videos converted – skipping merge.")
 
 
 if __name__ == '__main__':
