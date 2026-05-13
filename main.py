@@ -1,172 +1,139 @@
+import xml.etree.ElementTree as ET
 import os
-import xml.etree.ElementTree as Et
-
 import ffmpeg
 from loguru import logger
 
+# Configuration
+OUTPUT_RES = "1280x720" 
+FPS = 30
+STORAGE_DIR = "./storage"
+OUTPUT_DIR = "./output"
 
-def filter_files(files, start, end, sort=True):
-    filtered_files = filter(lambda f: f.startswith(start) and f.endswith(end), files)
-    filtered_files = list(filtered_files)
+def decode_xml(xml_path):
+    if not os.path.exists(xml_path):
+        logger.error(f"Error: {xml_path} not found.")
+        return None, 0
 
-    if sort:
-        filtered_files.sort(key=lambda f: f.lower())
+    xml = ET.parse(xml_path)
+    root = xml.getroot()
+    streams = {}
+    media = []
+    max_duration_ms = 0
 
-    return filtered_files
+    for message in root.findall('Message'):
+        msg_time = int(message.get('time', 0))
+        if msg_time > max_duration_ms: 
+            max_duration_ms = msg_time
+        
+        event_type = ""
+        for s in message.findall('String'):
+            if s.text in ["streamAdded", "streamRemoved"]:
+                event_type = s.text
+                break
+        
+        if not event_type: 
+            continue
+
+        array = message.find('Array')
+        if array is not None:
+            obj = array.find('Object')
+            if obj is not None:
+                s_id = obj.findtext('streamId')
+                s_name = obj.findtext('streamName', '').lstrip('/')
+                s_start = obj.findtext('startTime')
+                s_type = obj.findtext('streamType', '').lower()
+
+                if event_type == "streamAdded":
+                    streams[s_id] = {
+                        "name": s_name,
+                        "type": s_type,
+                        "start_ms": int(s_start) if s_start else msg_time
+                    }
+                elif event_type == "streamRemoved":
+                    if s_id in streams:
+                        data = streams.pop(s_id)
+                        data["end_ms"] = msg_time
+                        media.append(data)
+
+    for s_id, data in streams.items():
+        data["end_ms"] = max_duration_ms
+        media.append(data)
+
+    media.sort(key=lambda x: x['start_ms'])
+    return media, max_duration_ms / 1000.0 
+
+def generate_video(media_list, total_duration, output_filename="final_session.mp4"):
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    output_path = os.path.join(OUTPUT_DIR, output_filename)
+
+    # 1. Start with a Base: Black video and Silent audio
+    base_v = ffmpeg.input(f'color=c=black:s={OUTPUT_RES}:r={FPS}', f='lavfi', t=total_duration)
+    base_a = ffmpeg.input('anullsrc=channel_layout=stereo:sample_rate=44100', f='lavfi', t=total_duration)
+
+    video_streams = [base_v]
+    audio_streams = [base_a]
 
 
-def convert_media(file: str, output_format: str, output_path="./output/"):
-    os.makedirs(output_path, exist_ok=True)
+    for item in media_list:
+        file_path = os.path.join(STORAGE_DIR, f"{item['name']}.flv")
+        if not os.path.exists(file_path):
+            logger.warning(f"File missing: {file_path}")
+            continue
 
-    input_path = "./storage/" + file
-    base_name = os.path.splitext(file)[0]
-    output_file = output_path + base_name + output_format
+        start_sec = item['start_ms'] / 1000.0
+        
+        # Probe file to see what it contains
+        try:
+            probe = ffmpeg.probe(file_path)
+            has_video = any(s['codec_type'] == 'video' for s in probe['streams'])
+            has_audio = any(s['codec_type'] == 'audio' for s in probe['streams'])
+        except ffmpeg.Error:
+            continue
 
-    logger.info(f"Converting {file} to {output_format}")
-    logger.info(f"Input path: {input_path}")
-    logger.info(f"Output path: {output_file}")
+        input_node = ffmpeg.input(file_path)
 
+        if has_video:
+            v = (
+                input_node.video.filter('scale', OUTPUT_RES.split('x')[0], OUTPUT_RES.split('x')[1], force_original_aspect_ratio="increase").filter('crop', OUTPUT_RES.split('x')[0], OUTPUT_RES.split('x')[1]).filter('setpts', f'PTS-STARTPTS+{start_sec}/TB')
+            )
+            video_streams.append(v)
+
+        if has_audio:
+            a = (
+                input_node.audio.filter('adelay', f"{int(item['start_ms'])}|{int(item['start_ms'])}")
+            )
+            audio_streams.append(a)
+
+    all_vid = video_streams[0]
+    for i in range(1, len(video_streams)):
+        all_vid = ffmpeg.overlay(all_vid, video_streams[i], eof_action='pass')
+
+    if len(audio_streams) > 1:
+        all_aud = ffmpeg.filter(audio_streams, 'amix', inputs=len(audio_streams), duration='longest')
+    else:
+        all_aud = audio_streams[0]
+
+    # 4. Output
+    logger.info("Starting FFmpeg processing (this may take a while)...")
     try:
-        input_stream = ffmpeg.input(input_path)
-
-        streams = ffmpeg.probe(input_path)
-
-        video_stream = None
-        audio_stream = None
-
-        for stream in streams['streams']:
-            if stream['codec_type'] == 'video':
-                video_stream = input_stream.video
-            elif stream['codec_type'] == 'audio':
-                audio_stream = input_stream.audio
-
-        logger.debug(f"Video Stream Available: {bool(video_stream)}")
-        logger.debug(f"Audio Stream Available: {bool(audio_stream)}")
-
-        if output_format == ".mp4":
-            if video_stream and audio_stream:
-                processed_stream = ffmpeg.output(video_stream, audio_stream, output_file,
-                                                 vcodec="copy", preset="ultrafast", acodec="aac")
-            elif video_stream:
-                processed_stream = ffmpeg.output(video_stream, output_file, vcodec="libx264", preset="ultrafast", )
-            else:
-                logger.warning(f"No usable video found in {file} for MP4 conversion.")
-                return False
-
-        elif output_format == ".mp3":
-            if audio_stream:
-                processed_stream = ffmpeg.output(audio_stream, output_file, acodec="libmp3lame")
-            else:
-                logger.warning(f"No usable audio stream found in {file} for MP3 conversion")
-                return False
-        elif output_format == ".aac":
-            if audio_stream:
-                processed_stream = ffmpeg.output(audio_stream, output_file, acodec="aac")
-            else:
-                logger.warning(f"No usable audio stream found in {file} for AAC conversion")
-                return False
-        else:
-            logger.error(f"Unsupported output format {output_format}")
-            return False
-
-        ffmpeg.run(processed_stream, overwrite_output=True)
-        logger.success(f"Converted {file} to {output_format} successfully")
-
-        return True
-
+        (
+            ffmpeg.output(all_vid, all_aud, output_path, vcodec='libx264', acodec='aac', pix_fmt='yuv420p', preset='medium',t=total_duration).overwrite_output().run(capture_stdout=True, capture_stderr=True)
+        )
+        logger.success(f"Final video created: {output_path}")
     except ffmpeg.Error as e:
-        logger.error(f"FFMPEG error: {e.stderr.decode() if hasattr(e, 'stderr') else str(e)}")
-    except Exception as e:
-        logger.exception(f"An unexpected error occurred during media conversion: {e}")
-
-
-def create_videos_streams(video_list: list):
-    with open('./storage/streams.txt', 'w') as f:
-        for video in video_list:
-            abs_path = os.path.abspath(f"./output/{video}")
-            f.write(f"file '{abs_path}'\n")
-
-
-def merge_videos(file_name, streams_dir="./storage/", output_path="./output/"):
-    streams_file_path = os.path.join(streams_dir, "streams.txt")
-
-    if not os.path.exists(streams_file_path):
-        logger.error(f"Streams file does not exist: {streams_file_path}")
-        return
-
-    try:
-        merged_video_input = ffmpeg.input(streams_file_path, format="concat", safe=0)
-        merged_video_output = ffmpeg.output(merged_video_input, output_path + file_name, c="copy")
-
-        logger.info(f"Merging videos from {streams_file_path} to {output_path + file_name}")
-
-        ffmpeg.run(merged_video_output, overwrite_output=True, capture_stderr=True)
-        logger.success(f"Merged {file_name} successfully")
-    except ffmpeg.Error as e:
-        logger.error(f"FFMPEG error merging videos: {e.stderr.decode()}")
-    except Exception as e:
-        logger.error(f"An unexpected error merging videos: {e}")
-
-
-def get_timing(xml_file):
-    start_time, end_time = None, None
-
-    try:
-        xml = Et.parse(source=f'storage/{xml_file}')
-        root = xml.getroot()
-
-        message_elements = [
-            msg for msg in root.findall('.//Message')
-            if msg.find('Method').text == 'pacingTick'
-        ]
-
-        if message_elements:
-            first_message = message_elements[0]
-            last_message = message_elements[-1]
-
-            start_time = first_message.find('Number').text.strip()
-            end_time = last_message.find('Number').text.strip()
-
-            logger.info(f"Start time: {start_time}")
-            logger.info(f"End time: {end_time}")
-
-    except Et.ParseError as e:
-        logger.error(e)
-    except Exception as e:
-        logger.error(f"Unexpected error: {e}")
-
-    return start_time, end_time
-
+        logger.error(f"FFmpeg Error: {e.stderr.decode()}")
 
 def main():
     logger.add('log.txt')
+    XML_PATH = os.path.join(STORAGE_DIR, "indexstream.xml")
 
-    storage_files = os.listdir("./storage")
+    media_list, total_duration = decode_xml(XML_PATH)
+    
+    if not media_list or total_duration == 0:
+        logger.error("No media data found. Exiting.")
+        return
 
-    screen_shares = filter_files(storage_files, "screenshare", ".flv")
-    sounds_flv = filter_files(storage_files, "cameraVoip", ".flv")
-    sounds_xml = filter_files(storage_files, "cameraVoip", ".xml")
-
-    converted_videos = []
-
-    for v in screen_shares:
-        logger.info(f"Processing {v}")
-        if convert_media(v, output_format=".mp4"):
-            converted_videos.append(os.path.splitext(v)[0] + ".mp4")
-
-    if converted_videos:
-        create_videos_streams(converted_videos)
-        merge_videos('screenshare.mp4')
-    else:
-        logger.warning("No videos to merge!")
-
-    for sound in sounds_flv:
-        logger.info(f"Processing {sound}")
-        if convert_media(sound, output_format=".mp3"):
-            logger.info(f"Converted {sound}")
-        else:
-            logger.error(f"Convertion failed for {sound}")
-
+    generate_video(media_list, total_duration)
 
 if __name__ == '__main__':
     main()
