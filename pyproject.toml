@@ -2,9 +2,15 @@
 name = "ac-downloader"
 version = "0.1.0"
 description = "Adobe Connect downloader"
+dependencies = [
+    "core",
+]
 
 
 [tool.uv.workspace]
 members = [
-    'src/core'
+    'src/base'
 ]
+
+[tool.uv.sources]
+core = { workspace = true }
