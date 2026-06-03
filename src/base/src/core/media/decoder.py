@@ -1,13 +1,13 @@
-import os.path
-from typing import Tuple, List, Dict, Optional
 import xml.etree.ElementTree as ElementTree
+from pathlib import Path
+
 from loguru import logger
 
-EVENT_TYPES = ["streamAdded", "streamRemoved"]
+from . import enum as media_enum
 
 
-def decode(xml_path: str) -> Tuple[List[Dict], float]:
-    if not os.path.exists(xml_path):
+def decode(xml_path: str) -> tuple[list[dict], float]:
+    if not Path(xml_path).exists():
         logger.error(f"XML file {xml_path} does not exist.")
         return [], 0.0
 
@@ -18,9 +18,10 @@ def decode(xml_path: str) -> Tuple[List[Dict], float]:
         return _process(root)
     except ElementTree.ParseError as e:
         logger.error(f"Error parsing XML file {xml_path}: {e}")
+        return [], 0.0
 
 
-def _process(root: ElementTree.Element) -> Tuple[List[Dict], float]:
+def _process(root: ElementTree.Element) -> tuple[list[dict], float]:
     media = []
     streams = {}
     max_duration_ms = 0
@@ -45,8 +46,10 @@ def _process(root: ElementTree.Element) -> Tuple[List[Dict], float]:
 
 
 def _extract_event_type(message: ElementTree.Element) -> str:
+    event_values = {event.value for event in media_enum.EventType}
+
     for s in message.findall("String"):
-        if s.text in EVENT_TYPES:
+        if s.text in event_values:
             return s.text
 
     return ""
@@ -54,7 +57,7 @@ def _extract_event_type(message: ElementTree.Element) -> str:
 
 def _extract_stream_data(
     message: ElementTree.Element,
-) -> Optional[Tuple[str, str, str, str]]:
+) -> tuple[str, str, str, str] | None:
     array = message.find("Array")
 
     if array is None:
@@ -74,27 +77,28 @@ def _extract_stream_data(
 
 def _handle_stream_event(
     event_type: str,
-    streams: Dict,
-    media: List,
-    stream_data: Optional[Tuple[str, str, str, str]],
+    streams: dict,
+    media: list,
+    stream_data: tuple[str, str, str, str] | None,
     message_time: int,
-):
+) -> None:
     stream_id, stream_name, stream_start, stream_type = stream_data
 
-    if event_type == "streamAdded":
+    if event_type == media_enum.EventType.STREAM_ADDED.value:
         streams[stream_id] = {
             "name": stream_name,
             "type": stream_type,
             "start": int(stream_start) if stream_start else message_time,
         }
-    elif event_type == "streamRemoved":
-        if stream_id in streams:
-            data = streams.pop(stream_id)
-            data["end"] = message_time
-            media.append(data)
+    elif (
+        event_type == media_enum.EventType.STREAM_REMOVED.value and stream_id in streams
+    ):
+        data = streams.pop(stream_id)
+        data["end"] = message_time
+        media.append(data)
 
 
-def _handle_remaining_streams(streams: Dict, max_duration_ms: int, media: List):
-    for id, data in streams.items():
+def _handle_remaining_streams(streams: dict, max_duration_ms: int, media: list) -> None:
+    for data in streams.values():
         data["end"] = max_duration_ms
         media.append(data)
