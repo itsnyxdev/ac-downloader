@@ -12,3 +12,6 @@ storage/*
 !output/.gitkeep
 test.py
 log.txt
+.ruff_cache
+output
+storage
