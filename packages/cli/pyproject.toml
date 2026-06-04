@@ -2,12 +2,16 @@
 name = "cli"
 version = "1.0.0"
 requires-python = ">=3.11"
+dependencies = [
+    "pydantic-settings>=2.14.1",
+    "rich>=15.0.0",
+    "rtoml>=0.13.0",
+    "typer>=0.26.7",
+]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-[tool.hatch.build.targets.wheel]
-packages = [
-    'src/cli'
-]
+[project.scripts]
+ac-cli = "cli.main:main"

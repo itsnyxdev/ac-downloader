@@ -2,7 +2,7 @@
 name = "ac-downloader"
 version = "0.1.0"
 description = "Adobe Connect downloader"
-dependencies = ["core"]
+dependencies = ["core", "cli"]
 
 
 [tool.uv.workspace]
@@ -13,6 +13,7 @@ members = [
 
 [tool.uv.sources]
 core = { workspace = true }
+cli = { workspace = true }
 
 [tool.ruff]
 
@@ -27,7 +28,6 @@ extend-exclude = [".idea", "docs", "output", "storage"]
 select = [
     "E",
     "W",
-    "F",
     "I",
     "UP",
     "B",

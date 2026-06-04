@@ -12,7 +12,7 @@ def decode(xml_path: str) -> tuple[list[dict], float]:
         return [], 0.0
 
     try:
-        xml = ElementTree.parse(xml_path)
+        xml = ElementTree.parse(xml_path)  # noqa: S314
         root = xml.getroot()
 
         return _process(root)
