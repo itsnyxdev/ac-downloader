@@ -7,11 +7,6 @@ dependencies = [
     "ffmpeg-python>=0.2.0"
 ]
 
-[project.optional-dependencies]
-test = [
-    "pytest>=7.4.0",
-]
-
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

@@ -6,7 +6,10 @@ dependencies = ["core"]
 
 
 [tool.uv.workspace]
-members = ['src/base']
+members = [
+    'packages/base',
+    'packages/cli'
+]
 
 [tool.uv.sources]
 core = { workspace = true }
