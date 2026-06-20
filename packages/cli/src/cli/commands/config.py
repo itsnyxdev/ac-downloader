@@ -32,6 +32,6 @@ def reset() -> None:
 
     if path.exists():
         path.unlink()
-        printer.success("Configuration reset successfuly.")
+        printer.success("Configuration reset successfully.")
     else:
         printer.success("No configuration file found.")
