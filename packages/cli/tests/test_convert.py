@@ -10,7 +10,8 @@ from typer.testing import CliRunner
 runner = CliRunner()
 
 
-def test_convert_missing_indexstream():
+@patch("cli.commands.convert.ffmpeg.detect", return_value="/usr/bin/ffmpeg")
+def test_convert_missing_indexstream(mock_detect):
     with tempfile.TemporaryDirectory() as tmpdir:
         result = runner.invoke(app, ["convert", tmpdir])
         assert result.exit_code == 1
