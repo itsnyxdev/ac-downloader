@@ -4,6 +4,7 @@ from typing import Any
 import rtoml
 
 from ..config import Settings
+from .printer import error
 
 settings = Settings()
 
@@ -29,7 +30,7 @@ def load() -> dict[str, Any]:
         with path.open("r", encoding="utf-8") as file:
             return rtoml.load(file)
     except Exception as e:
-        # TODO: Show errors with rich
+        error(f"Failed to load config: {e}")
         return {}
 
 
@@ -41,24 +42,5 @@ def save(config: dict[str, Any]) -> bool:
             rtoml.dump(config, file)
         return True
     except Exception as e:
-        # TODO: Show errors with rich
-        return False
-
-
-def edit(key: str, value: Any, section: str | None = None) -> bool:  # noqa: ANN401
-    config = load()
-
-    try:
-        if section:
-            if section not in config:
-                config[section] = {}
-
-            if not isinstance(config[section], dict):
-                raise TypeError(f"Section '{section}' is not a table")
-            config[section][key] = value
-
-        else:
-            config[key] = value
-        return save(config)
-    except Exception as e:
+        error(f"Failed to save config: {e}")
         return False

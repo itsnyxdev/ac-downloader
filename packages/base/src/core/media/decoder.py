@@ -4,9 +4,10 @@ from pathlib import Path
 from loguru import logger
 
 from . import enum as media_enum
+from .models import MediaItem
 
 
-def decode(xml_path: str) -> tuple[list[dict], float]:
+def decode(xml_path: str) -> tuple[list[MediaItem], float]:
     if not Path(xml_path).exists():
         logger.error(f"XML file {xml_path} does not exist.")
         return [], 0.0
@@ -21,9 +22,9 @@ def decode(xml_path: str) -> tuple[list[dict], float]:
         return [], 0.0
 
 
-def _process(root: ElementTree.Element) -> tuple[list[dict], float]:
-    media = []
-    streams = {}
+def _process(root: ElementTree.Element) -> tuple[list[MediaItem], float]:
+    media: list[MediaItem] = []
+    streams: dict[str, dict] = {}
     max_duration_ms = 0
 
     for message in root.findall("Message"):
@@ -40,7 +41,7 @@ def _process(root: ElementTree.Element) -> tuple[list[dict], float]:
 
     _handle_remaining_streams(streams, max_duration_ms, media)
 
-    media.sort(key=lambda m: m["start"])
+    media.sort(key=lambda m: m.start)
 
     return media, max_duration_ms / 1000.0
 
@@ -57,7 +58,7 @@ def _extract_event_type(message: ElementTree.Element) -> str:
 
 def _extract_stream_data(
     message: ElementTree.Element,
-) -> tuple[str, str, str, str] | None:
+) -> tuple[str, str, str | None, str] | None:
     array = message.find("Array")
 
     if array is None:
@@ -77,9 +78,9 @@ def _extract_stream_data(
 
 def _handle_stream_event(
     event_type: str,
-    streams: dict,
-    media: list,
-    stream_data: tuple[str, str, str, str] | None,
+    streams: dict[str, dict],
+    media: list[MediaItem],
+    stream_data: tuple[str, str, str | None, str],
     message_time: int,
 ) -> None:
     stream_id, stream_name, stream_start, stream_type = stream_data
@@ -94,11 +95,25 @@ def _handle_stream_event(
         event_type == media_enum.EventType.STREAM_REMOVED.value and stream_id in streams
     ):
         data = streams.pop(stream_id)
-        data["end"] = message_time
-        media.append(data)
+        media.append(
+            MediaItem(
+                name=data["name"],
+                type=data["type"],
+                start=data["start"],
+                end=message_time,
+            )
+        )
 
 
-def _handle_remaining_streams(streams: dict, max_duration_ms: int, media: list) -> None:
-    for data in streams.values():
-        data["end"] = max_duration_ms
-        media.append(data)
+def _handle_remaining_streams(
+    streams: dict[str, dict], max_duration_ms: int, media: list[MediaItem]
+) -> None:
+    media.extend(
+        MediaItem(
+            name=data["name"],
+            type=data["type"],
+            start=data["start"],
+            end=max_duration_ms,
+        )
+        for data in streams.values()
+    )

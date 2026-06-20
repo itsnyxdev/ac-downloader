@@ -3,24 +3,20 @@ from pathlib import Path
 import ffmpeg
 from loguru import logger
 
+from .models import MediaItem, OutputConfig
+
 
 def generate(
-    media_list: list[dict], total_duration: float, output_config: dict
+    media_list: list[MediaItem], total_duration: float, config: OutputConfig
 ) -> None:
-    output_dir = output_config["dir"]
-    storage_dir = output_config["storage"]
-    output_filename = output_config["filename"]
-    fps = output_config["fps"]
-    resolution_str = output_config["resolution"]
+    Path(config.dir).mkdir(parents=True, exist_ok=True)
+    output_path = str(Path(config.dir) / config.filename)
 
-    Path(output_dir).mkdir(parents=True, exist_ok=True)
-    output_path = str(Path(output_dir) / output_filename)
-
-    video_streams = [_create_base_video(fps, resolution_str, total_duration)]
+    video_streams = [_create_base_video(config.fps, config.resolution, total_duration)]
     audio_streams = [_create_base_audio(total_duration)]
 
     for item in media_list:
-        _process(item, video_streams, audio_streams, storage_dir, resolution_str)
+        _process(item, video_streams, audio_streams, config.storage, config.resolution)
 
     _combine(video_streams, audio_streams, output_path, total_duration)
 
@@ -42,19 +38,19 @@ def _create_base_audio(duration: float) -> ffmpeg.Stream:
 
 
 def _process(
-    item: dict,
+    item: MediaItem,
     video_streams: list[ffmpeg.Stream],
     audio_streams: list[ffmpeg.Stream],
     storage_dir: str,
     resolution_str: str,
 ) -> None:
-    file_path = str(Path(storage_dir) / f"{item['name']}.flv")
+    file_path = str(Path(storage_dir) / f"{item.name}.flv")
 
     if not Path(file_path).exists():
         logger.warning(f"File {file_path} doesn't exist")
         return
 
-    start_seconds = item["start"] / 1000.0
+    start_seconds = item.start / 1000.0
 
     try:
         probe_data = ffmpeg.probe(file_path)
@@ -70,7 +66,7 @@ def _process(
         _add_video_stream(input_node, video_streams, start_seconds, resolution_str)
 
     if has_audio:
-        _add_audio_stream(input_node, audio_streams, item["start"])
+        _add_audio_stream(input_node, audio_streams, item.start)
 
 
 def _add_video_stream(
@@ -79,14 +75,15 @@ def _add_video_stream(
     start_seconds: float,
     resolution_str: str,
 ) -> None:
+    width, height = resolution_str.split("x")
     video_filter_chain = (
         input_node.video.filter(
             "scale",
-            resolution_str.split("x")[0],
-            resolution_str.split("x")[1],
+            width,
+            height,
             force_original_aspect_ratio="increase",
         )
-        .filter("crop", resolution_str.split("x")[0], resolution_str.split("x")[1])
+        .filter("crop", width, height)
         .filter("setpts", f"PTS-STARTPTS+{start_seconds}/TB")
     )
 
@@ -127,6 +124,10 @@ def _combine(
 
     for i in range(1, len(video_streams)):
         final_video = ffmpeg.overlay(final_video, video_streams[i], eof_action="pass")
+
+    if len(audio_streams) == 0:
+        logger.error("No audio streams found")
+        return
 
     if len(audio_streams) > 1:
         final_audio = ffmpeg.filter(
