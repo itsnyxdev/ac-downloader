@@ -22,6 +22,9 @@ indent-width = 4
 
 extend-exclude = [".idea", "docs", "output", "storage"]
 
+[tool.ruff.lint.per-file-ignores]
+"**/tests/*" = ["S101", "ANN", "ANN001", "ANN201"]
+
 
 [tool.ruff.lint]
 
@@ -55,3 +58,12 @@ indent-style = "space"
 docstring-code-format = true
 docstring-code-line-length = "dynamic"
 skip-magic-trailing-comma = false
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["packages/cli/src", "packages/base/src"]
+testpaths = ["packages"]
