@@ -24,20 +24,18 @@ jobs:
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
-        with:
-          enable-cache: true
 
       - name: Set up Python
         run: uv python install ${{ env.PYTHON_VERSION }}
 
       - name: Install dependencies
-        run: uv sync --all-packages
+        run: uv sync
 
       - name: Lint
         run: uv run ruff check .
 
       - name: Run tests
-        run: uv run pytest
+        run: uv run pytest -v --tb=short
 
   build:
     needs: test
@@ -62,14 +60,12 @@ jobs:
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
-        with:
-          enable-cache: true
 
       - name: Set up Python
         run: uv python install ${{ env.PYTHON_VERSION }}
 
       - name: Install dependencies
-        run: uv sync --all-packages
+        run: uv sync
 
       - name: Resolve FFmpeg download URLs
         if: matrix.platform != 'macos'
