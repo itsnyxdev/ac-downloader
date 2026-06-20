@@ -1,0 +1,252 @@
+name: Build
+
+on:
+  push:
+    tags:
+      - "v*"
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+
+env:
+  PYTHON_VERSION: "3.12"
+  FFMPEG_REPO: "BtbN/FFmpeg-Builds"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: uv sync --all-packages
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Run tests
+        run: uv run pytest
+
+  build:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+            artifact_ext: ".exe"
+          - os: ubuntu-latest
+            platform: linux
+            artifact_ext: ""
+          - os: macos-latest
+            platform: macos
+            artifact_ext: ""
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: uv sync --all-packages
+
+      - name: Resolve FFmpeg download URLs
+        if: matrix.platform != 'macos'
+        id: ffmpeg
+        shell: bash
+        run: |
+          if [ "${{ matrix.platform }}" = "windows" ]; then
+            pattern="win64-lgpl"
+          else
+            pattern="linux64-lgpl"
+          fi
+          urls=$(curl -s "https://api.github.com/repos/${{ env.FFMPEG_REPO }}/releases/latest" \
+            | jq -r ".assets[] | select(.name | test(\"${pattern}\")) | .browser_download_url")
+          url=$(echo "$urls" | head -n1)
+          if [ -z "$url" ]; then
+            echo "::error::Could not find FFmpeg asset matching '${pattern}'"
+            exit 1
+          fi
+          echo "url=${url}" >> "$GITHUB_OUTPUT"
+          echo "Found FFmpeg asset: ${url}"
+
+      - name: Install FFmpeg (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $ProgressPreference = 'SilentlyContinue'
+          Invoke-WebRequest -Uri "${{ steps.ffmpeg.outputs.url }}" -OutFile ffmpeg.zip
+          Expand-Archive -Path ffmpeg.zip -DestinationPath .
+          $dir = Get-ChildItem -Directory -Filter "ffmpeg-*" | Select-Object -First 1
+          $binPath = Join-Path $dir.FullName "bin"
+          Add-Content $env:GITHUB_PATH $binPath
+          Write-Host "Added to PATH: $binPath"
+
+      - name: Install FFmpeg (Linux)
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          curl -L -o ffmpeg.tar.xz "${{ steps.ffmpeg.outputs.url }}"
+          mkdir ffmpeg
+          tar -xf ffmpeg.tar.xz -C ffmpeg --strip-components=0
+          dir=$(ls -d ffmpeg/ffmpeg-* | head -n1)
+          echo "$(pwd)/${dir}/bin" >> "$GITHUB_PATH"
+          echo "Added to PATH: $(pwd)/${dir}/bin"
+
+      - name: Install FFmpeg (macOS)
+        if: matrix.platform == 'macos'
+        run: brew install ffmpeg
+
+      - name: Verify FFmpeg
+        run: ffmpeg -version
+
+      - name: Build with PyInstaller
+        shell: bash
+        run: |
+          uv pip install pyinstaller
+          uv run pyinstaller \
+            --name ac-downloader \
+            --onefile \
+            --console \
+            --hidden-import core \
+            --hidden-import core.media \
+            --hidden-import core.media.merger \
+            --hidden-import core.media.decoder \
+            --hidden-import core.media.models \
+            --hidden-import core.media.enum \
+            --hidden-import core.utils \
+            --hidden-import cli \
+            --hidden-import cli.commands \
+            --hidden-import cli.commands.convert \
+            --hidden-import cli.commands.config \
+            --hidden-import cli.utils \
+            --hidden-import cli.utils.ffmpeg \
+            --hidden-import cli.utils.printer \
+            --hidden-import cli.utils.config \
+            --hidden-import cli.enums \
+            --hidden-import cli.enums.quality \
+            --hidden-import cli.config \
+            --hidden-import cli.app \
+            --hidden-import cli.main \
+            packages/cli/src/cli/main.py
+
+      - name: Prepare distribution
+        shell: bash
+        run: |
+          mkdir -p dist/distribution
+          if [ "${{ matrix.platform }}" = "windows" ]; then
+            cp dist/ac-downloader.exe dist/distribution/
+          else
+            cp dist/ac-downloader dist/distribution/
+            chmod +x dist/distribution/ac-downloader
+          fi
+          cat > dist/distribution/README.txt <<-'README'
+          ac-downloader - Adobe Connect Recording Converter
+
+          REQUIREMENTS:
+          This application requires FFmpeg to be installed and available on your PATH.
+          Alternatively, set the FFMPEG_PATH environment variable to the ffmpeg binary.
+
+          INSTALL FFMPEG:
+              Windows: https://github.com/BtbN/FFmpeg-Builds/releases
+                       Extract and add the bin/ folder to your PATH.
+
+              Debian/Ubuntu: sudo apt install ffmpeg
+              Fedora:        sudo dnf install ffmpeg
+              Arch Linux:    sudo pacman -S ffmpeg
+              macOS:         brew install ffmpeg
+
+          USAGE:
+              ac-downloader convert <recording-directory> [--output-dir <dir>] [--quality low|medium|high]
+          README
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ac-downloader-${{ matrix.platform }}
+          path: dist/distribution/
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Validate tag format
+        run: |
+          tag="${{ github.ref_name }}"
+          version="${tag#v}"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
+            echo "::error::Invalid tag format '${tag}'. Expected vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-prerelease"
+            exit 1
+          fi
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Detect pre-release
+        id: meta
+        run: |
+          tag="${{ github.ref_name }}"
+          version="${tag#v}"
+          if [[ "$version" =~ - ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "type=Pre-release" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "type=Release" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Package release assets
+        run: |
+          cd artifacts
+          zip -r ../ac-downloader-windows-${{ github.ref_name }}.zip ac-downloader-windows/
+          tar -czf ../ac-downloader-linux-${{ github.ref_name }}.tar.gz ac-downloader-linux/
+          tar -czf ../ac-downloader-macos-${{ github.ref_name }}.tar.gz ac-downloader-macos/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ac-downloader ${{ github.ref_name }}
+          prerelease: ${{ steps.meta.outputs.prerelease }}
+          generate_release_notes: true
+          files: |
+            ac-downloader-windows-${{ github.ref_name }}.zip
+            ac-downloader-linux-${{ github.ref_name }}.tar.gz
+            ac-downloader-macos-${{ github.ref_name }}.tar.gz
+
+      - name: Summary
+        run: |
+          echo "## ${{ steps.meta.outputs.type }}: ${{ github.ref_name }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Platform | Asset |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|----------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Windows | \`ac-downloader-windows-${{ github.ref_name }}.zip\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Linux | \`ac-downloader-linux-${{ github.ref_name }}.tar.gz\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| macOS | \`ac-downloader-macos-${{ github.ref_name }}.tar.gz\` |" >> "$GITHUB_STEP_SUMMARY"
