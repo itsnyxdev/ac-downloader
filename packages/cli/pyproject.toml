@@ -3,6 +3,7 @@ name = "cli"
 version = "1.0.0"
 requires-python = ">=3.11"
 dependencies = [
+    "core",
     "pydantic-settings>=2.14.1",
     "rich>=15.0.0",
     "rtoml>=0.13.0",
