@@ -1,4 +1,7 @@
-from .app import app
+try:
+    from .app import app
+except ImportError:
+    from cli.app import app
 
 
 def main() -> None:
