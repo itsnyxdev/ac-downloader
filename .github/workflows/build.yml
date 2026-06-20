@@ -108,6 +108,7 @@ jobs:
           tar -xf ffmpeg.tar.xz -C ffmpeg --strip-components=0
           dir=$(ls -d ffmpeg/ffmpeg-* | head -n1)
           echo "$(pwd)/${dir}/bin" >> "$GITHUB_PATH"
+          echo "LD_LIBRARY_PATH=$(pwd)/${dir}/lib:$LD_LIBRARY_PATH" >> "$GITHUB_ENV"
           echo "Added to PATH: $(pwd)/${dir}/bin"
 
       - name: Install FFmpeg (macOS)
