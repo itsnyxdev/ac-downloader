@@ -4,6 +4,7 @@ AppVersion=1.0.0
 AppPublisher=ac-downloader
 DefaultDirName={autopf}\ac-downloader
 DefaultGroupName=ac-downloader
+OutputDir=..\dist\installer
 OutputBaseFilename=ac-downloader-amd64
 Compression=lzma2
 SolidCompression=yes
