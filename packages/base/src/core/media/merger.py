@@ -16,9 +16,22 @@ def generate(
     audio_streams = [_create_base_audio(total_duration)]
 
     for item in media_list:
-        _process(item, video_streams, audio_streams, config.storage, config.resolution)
+        _process(
+            item,
+            video_streams,
+            audio_streams,
+            config.storage,
+            config.resolution,
+            config.ffprobe_bin,
+        )
 
-    _combine(video_streams, audio_streams, output_path, total_duration)
+    _combine(
+        video_streams,
+        audio_streams,
+        output_path,
+        total_duration,
+        config.ffmpeg_bin,
+    )
 
 
 def _create_base_video(fps: int, resolution_str: str, duration: float) -> ffmpeg.Stream:
@@ -43,6 +56,7 @@ def _process(
     audio_streams: list[ffmpeg.Stream],
     storage_dir: str,
     resolution_str: str,
+    ffprobe_bin: str = "ffprobe",
 ) -> None:
     file_path = str(Path(storage_dir) / f"{item.name}.flv")
 
@@ -53,7 +67,7 @@ def _process(
     start_seconds = item.start / 1000.0
 
     try:
-        probe_data = ffmpeg.probe(file_path)
+        probe_data = ffmpeg.probe(file_path, cmd=ffprobe_bin)
         has_video, has_audio = _detect_streams(probe_data)
     except ffmpeg.Error as e:
         logger.warning(f"Failed to probe {file_path}, skipping...")
@@ -119,6 +133,7 @@ def _combine(
     audio_streams: list[ffmpeg.Stream],
     output_path: str,
     total_duration: float,
+    ffmpeg_bin: str = "ffmpeg",
 ) -> None:
     final_video = video_streams[0]
 
@@ -150,7 +165,7 @@ def _combine(
                 t=total_duration,
             )
             .overwrite_output()
-            .run(capture_stdout=True, capture_stderr=True)
+            .run(cmd=ffmpeg_bin, capture_stdout=True, capture_stderr=True)
         )
 
         logger.success(f"Final video created: {output_path}")

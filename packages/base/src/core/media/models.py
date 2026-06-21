@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -16,3 +16,5 @@ class OutputConfig:
     filename: str
     fps: int
     resolution: str
+    ffmpeg_bin: str = field(default="ffmpeg")
+    ffprobe_bin: str = field(default="ffprobe")

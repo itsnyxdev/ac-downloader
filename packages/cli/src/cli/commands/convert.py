@@ -45,11 +45,14 @@ def convert(
         ),
     ] = Quality.MEDIUM,
 ) -> None:
-    if not ffmpeg.detect():
+    ffmpeg_bin = ffmpeg.detect()
+    if not ffmpeg_bin:
         printer.error(
             "FFmpeg not found. Install it or set FFMPEG_PATH environment variable."
         )
         raise typer.Exit(code=1)
+
+    ffprobe_bin = ffmpeg.resolve_ffprobe()
 
     xml_path = input_dir / "indexstream.xml"
     if not xml_path.exists():
@@ -68,6 +71,8 @@ def convert(
         filename=OUTPUT_FILENAME,
         fps=settings["fps"],
         resolution=resolution,
+        ffmpeg_bin=ffmpeg_bin,
+        ffprobe_bin=ffprobe_bin or "ffprobe",
     )
 
     _setup_logger()
