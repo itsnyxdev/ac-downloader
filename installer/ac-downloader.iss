@@ -16,6 +16,7 @@ ChangesEnvironment=yes
 Source: "..\dist\ac-downloader\*"; DestDir: "{app}"; Flags: recursesubdirs
 Source: "..\dist\ffmpeg\ffmpeg.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\dist\ffmpeg\ffprobe.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\dist\ffmpeg\*.dll"; DestDir: "{app}"; Flags: ignoreversion
 
 [Registry]
 Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\Session Manager\Environment"; \

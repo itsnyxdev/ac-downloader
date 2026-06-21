@@ -222,6 +222,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path dist/ffmpeg
           Copy-Item "$($dir.FullName)/bin/ffmpeg.exe" dist/ffmpeg/
           Copy-Item "$($dir.FullName)/bin/ffprobe.exe" dist/ffmpeg/
+          Copy-Item "$($dir.FullName)/bin/*.dll" dist/ffmpeg/
           Write-Host "FFmpeg binaries staged in dist/ffmpeg/"
 
       - name: Build with PyInstaller (--onedir)
