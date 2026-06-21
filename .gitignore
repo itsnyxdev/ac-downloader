@@ -16,3 +16,4 @@ log.txt
 output
 storage
 .pytest*
+docs/compose
