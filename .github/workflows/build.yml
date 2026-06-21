@@ -76,7 +76,7 @@ jobs:
         shell: bash
         run: |
           if [ "${{ matrix.platform }}" = "windows" ]; then
-            pattern="win64-lgpl"
+            pattern="win64-gpl"
           else
             pattern="linux64-lgpl"
           fi
@@ -210,9 +210,9 @@ jobs:
           $ProgressPreference = 'SilentlyContinue'
           $apiUrl = "https://api.github.com/repos/${{ env.FFMPEG_REPO }}/releases/latest"
           $release = Invoke-RestMethod -Uri $apiUrl
-          $asset = $release.assets | Where-Object { $_.name -match 'win64-lgpl' } | Select-Object -First 1
+          $asset = $release.assets | Where-Object { $_.name -match 'win64-gpl' } | Select-Object -First 1
           if (-not $asset) {
-            Write-Error "Could not find FFmpeg win64-lgpl asset"
+            Write-Error "Could not find FFmpeg win64-gpl asset"
             exit 1
           }
           Write-Host "Downloading: $($asset.browser_download_url)"

@@ -171,3 +171,4 @@ def _combine(
         logger.success(f"Final video created: {output_path}")
     except ffmpeg.Error as e:
         logger.error(f"FFmpeg Error: {e.stderr.decode()}")
+        raise
