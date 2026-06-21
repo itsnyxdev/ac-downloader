@@ -188,9 +188,93 @@ jobs:
           path: dist/distribution/
           if-no-files-found: error
 
+  build-installer:
+    needs: test
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Download FFmpeg
+        shell: pwsh
+        run: |
+          $ProgressPreference = 'SilentlyContinue'
+          $apiUrl = "https://api.github.com/repos/${{ env.FFMPEG_REPO }}/releases/latest"
+          $release = Invoke-RestMethod -Uri $apiUrl
+          $asset = $release.assets | Where-Object { $_.name -match 'win64-lgpl' } | Select-Object -First 1
+          if (-not $asset) {
+            Write-Error "Could not find FFmpeg win64-lgpl asset"
+            exit 1
+          }
+          Write-Host "Downloading: $($asset.browser_download_url)"
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile ffmpeg.zip
+          Expand-Archive -Path ffmpeg.zip -DestinationPath .
+          $dir = Get-ChildItem -Directory -Filter "ffmpeg-*" | Select-Object -First 1
+          New-Item -ItemType Directory -Force -Path dist/ffmpeg
+          Copy-Item "$($dir.FullName)/bin/ffmpeg.exe" dist/ffmpeg/
+          Copy-Item "$($dir.FullName)/bin/ffprobe.exe" dist/ffmpeg/
+          Write-Host "FFmpeg binaries staged in dist/ffmpeg/"
+
+      - name: Build with PyInstaller (--onedir)
+        shell: bash
+        run: |
+          uv pip install pyinstaller
+          uv run pyinstaller \
+            --name ac-downloader \
+            --onedir \
+            --console \
+            --hidden-import core \
+            --hidden-import core.media \
+            --hidden-import core.media.merger \
+            --hidden-import core.media.decoder \
+            --hidden-import core.media.models \
+            --hidden-import core.media.enum \
+            --hidden-import core.utils \
+            --hidden-import cli \
+            --hidden-import cli.commands \
+            --hidden-import cli.commands.convert \
+            --hidden-import cli.commands.config \
+            --hidden-import cli.utils \
+            --hidden-import cli.utils.ffmpeg \
+            --hidden-import cli.utils.printer \
+            --hidden-import cli.utils.config \
+            --hidden-import cli.enums \
+            --hidden-import cli.enums.quality \
+            --hidden-import cli.config \
+            --hidden-import cli.app \
+            --hidden-import cli.main \
+            packages/cli/src/cli/main.py
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup -y
+          echo "C:\Program Files (x86)\Inno Setup 6" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Compile installer
+        shell: pwsh
+        run: |
+          ISCC.exe installer\ac-downloader.iss
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ac-downloader-windows-installer-amd64
+          path: dist/installer/ac-downloader-amd64.exe
+          if-no-files-found: error
+
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs: [build, build-installer]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -227,6 +311,7 @@ jobs:
         run: |
           cd artifacts
           zip -r ../ac-downloader-windows-amd64-${{ github.ref_name }}.zip ac-downloader-windows-amd64/
+          cp ac-downloader-windows-installer-amd64/ac-downloader-amd64.exe ../ac-downloader-installer-amd64-${{ github.ref_name }}.exe
           tar -czf ../ac-downloader-linux-amd64-${{ github.ref_name }}.tar.gz ac-downloader-linux-amd64/
           tar -czf ../ac-downloader-macos-arm64-${{ github.ref_name }}.tar.gz ac-downloader-macos-arm64/
 
@@ -238,6 +323,7 @@ jobs:
           generate_release_notes: true
           files: |
             ac-downloader-windows-amd64-${{ github.ref_name }}.zip
+            ac-downloader-installer-amd64-${{ github.ref_name }}.exe
             ac-downloader-linux-amd64-${{ github.ref_name }}.tar.gz
             ac-downloader-macos-arm64-${{ github.ref_name }}.tar.gz
 
@@ -248,5 +334,6 @@ jobs:
           echo "| Platform | Asset |" >> "$GITHUB_STEP_SUMMARY"
           echo "|----------|-------|" >> "$GITHUB_STEP_SUMMARY"
           echo "| Windows | \`ac-downloader-windows-amd64-${{ github.ref_name }}.zip\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Windows (installer) | \`ac-downloader-installer-amd64-${{ github.ref_name }}.exe\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Linux | \`ac-downloader-linux-amd64-${{ github.ref_name }}.tar.gz\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| macOS | \`ac-downloader-macos-arm64-${{ github.ref_name }}.tar.gz\` |" >> "$GITHUB_STEP_SUMMARY"
