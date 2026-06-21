@@ -45,12 +45,15 @@ jobs:
         include:
           - os: windows-latest
             platform: windows
+            arch: amd64
             artifact_ext: ".exe"
           - os: ubuntu-latest
             platform: linux
+            arch: amd64
             artifact_ext: ""
           - os: macos-latest
             platform: macos
+            arch: arm64
             artifact_ext: ""
 
     runs-on: ${{ matrix.os }}
@@ -153,10 +156,10 @@ jobs:
         run: |
           mkdir -p dist/distribution
           if [ "${{ matrix.platform }}" = "windows" ]; then
-            cp dist/ac-downloader.exe dist/distribution/
+            cp dist/ac-downloader.exe "dist/distribution/ac-downloader-${{ matrix.arch }}.exe"
           else
-            cp dist/ac-downloader dist/distribution/
-            chmod +x dist/distribution/ac-downloader
+            cp dist/ac-downloader "dist/distribution/ac-downloader-${{ matrix.arch }}"
+            chmod +x "dist/distribution/ac-downloader-${{ matrix.arch }}"
           fi
           cat > dist/distribution/README.txt <<-'README'
           ac-downloader - Adobe Connect Recording Converter
@@ -181,7 +184,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ac-downloader-${{ matrix.platform }}
+          name: ac-downloader-${{ matrix.platform }}-${{ matrix.arch }}
           path: dist/distribution/
           if-no-files-found: error
 
@@ -223,9 +226,9 @@ jobs:
       - name: Package release assets
         run: |
           cd artifacts
-          zip -r ../ac-downloader-windows-${{ github.ref_name }}.zip ac-downloader-windows/
-          tar -czf ../ac-downloader-linux-${{ github.ref_name }}.tar.gz ac-downloader-linux/
-          tar -czf ../ac-downloader-macos-${{ github.ref_name }}.tar.gz ac-downloader-macos/
+          zip -r ../ac-downloader-windows-amd64-${{ github.ref_name }}.zip ac-downloader-windows-amd64/
+          tar -czf ../ac-downloader-linux-amd64-${{ github.ref_name }}.tar.gz ac-downloader-linux-amd64/
+          tar -czf ../ac-downloader-macos-arm64-${{ github.ref_name }}.tar.gz ac-downloader-macos-arm64/
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -234,9 +237,9 @@ jobs:
           prerelease: ${{ steps.meta.outputs.prerelease }}
           generate_release_notes: true
           files: |
-            ac-downloader-windows-${{ github.ref_name }}.zip
-            ac-downloader-linux-${{ github.ref_name }}.tar.gz
-            ac-downloader-macos-${{ github.ref_name }}.tar.gz
+            ac-downloader-windows-amd64-${{ github.ref_name }}.zip
+            ac-downloader-linux-amd64-${{ github.ref_name }}.tar.gz
+            ac-downloader-macos-arm64-${{ github.ref_name }}.tar.gz
 
       - name: Summary
         run: |
@@ -244,6 +247,6 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "| Platform | Asset |" >> "$GITHUB_STEP_SUMMARY"
           echo "|----------|-------|" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Windows | \`ac-downloader-windows-${{ github.ref_name }}.zip\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Linux | \`ac-downloader-linux-${{ github.ref_name }}.tar.gz\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| macOS | \`ac-downloader-macos-${{ github.ref_name }}.tar.gz\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Windows | \`ac-downloader-windows-amd64-${{ github.ref_name }}.zip\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Linux | \`ac-downloader-linux-amd64-${{ github.ref_name }}.tar.gz\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| macOS | \`ac-downloader-macos-arm64-${{ github.ref_name }}.tar.gz\` |" >> "$GITHUB_STEP_SUMMARY"
